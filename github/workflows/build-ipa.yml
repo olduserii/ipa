@@ -1,0 +1,72 @@
+name: Build Unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      app_version:
+        description: 'Версия приложения (например, 1.0.0)'
+        required: false
+        default: '1.0.0'
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+jobs:
+  build-ipa:
+    name: Compile SwiftUI & Package Unsigned IPA
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check Xcode version
+        run: |
+          xcode-select -p
+          xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        run: xcodegen generate
+
+      - name: Resolve Swift Package dependencies
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project IPAVault.xcodeproj \
+            -scheme IPAVault
+
+      - name: Build unsigned Release app for iOS
+        run: |
+          VERSION="${{ github.event.inputs.app_version || '1.0.0' }}"
+          xcodebuild clean build \
+            -project IPAVault.xcodeproj \
+            -scheme IPAVault \
+            -configuration Release \
+            -sdk iphoneos \
+            -destination 'generic/platform=iOS' \
+            MARKETING_VERSION="$VERSION" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            AD_HOC_CODE_SIGNING_ALLOWED=NO \
+            BUILD_DIR="$PWD/build"
+
+      - name: Package .ipa archive
+        run: |
+          mkdir -p Payload
+          cp -R build/Release-iphoneos/IPAVault.app Payload/IPAVault.app
+          rm -rf Payload/IPAVault.app/_CodeSignature
+          zip -r -y IPAVault-unsigned.ipa Payload
+          ls -lh IPAVault-unsigned.ipa
+
+      - name: Upload unsigned IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: IPAVault-unsigned-ipa
+          path: IPAVault-unsigned.ipa
+          retention-days: 30
